@@ -1,6 +1,6 @@
 - Feature Name: media-webrtc-sdk
 - Start Date: 2024-02-02
-- RFC PR: [8xff/rfcs#0000](https://github.com/8xff/rfcs/pull/0000)
+- RFC PR: [8xff/rfcs#0005](https://github.com/8xff/rfcs/pull/0005)
 
 # 1. Summary
 
@@ -40,20 +40,21 @@ We have some terms:
 
 **Request and Response Format**
 
-All requests and responses will be encoded in JSON format. The format is described as follows:
+All requests and responses will be encoded in Protobuf format. In case of have error, server will response with below content:
 
-**_Body:_**: JSON
-
-**_Response:_**
-
-```
-{
-    success: bool,
-    error_code: Option<String>,
-    error_msg: Option<String>,
-    data: Option<JSON>,
+```protobuf
+message Error {
+    uint32 code = 1;
+    string message = 2;
 }
 ```
+
+In folder 0005-media-webrtc-sdk includes all protobuf schemas:
+
+- [shared.proto](./0005-media-webrtc-sdk/shared.proto): all data types
+- [gateway.proto](./0005-media-webrtc-sdk/gateway.proto): for interact with gateway node
+- [conn.proto](./0005-media-webrtc-sdk/conn.proto): for interact with media-server over datachannel
+- [features.proto](./0005-media-webrtc-sdk/features.proto): for feature extension
 
 ## 4.2 Connect Establishment
 
@@ -71,103 +72,39 @@ Once the client is ready, it can send a connect request to the server.
 
 **_Body_**:
 
-```
-{
-    version: Option<String>,
-    room_id: String,
-    peer_id: String,
-    metadata: Option<String>,
-    event: {
-        publish: "full" | "track",
-        subscribe: "full" | "track" | "manual",
-    },
-    bitrate: {
-        ingress: "save" | "max",
-    },
-    features: JSON,
-    tracks: {
-        receivers: [
-            {
-                kind: "audio" | "video",
-                id: String,
-                state: Option<{
-                    source: Option<{
-                        peer_id: String,
-                        track_id: String,
-                    }>,
-                    limit: Option<{
-                        priority: u16,
-                        min_spatial: Option<u8>,
-                        max_spatial: u8,
-                        min_temporal: Option<u8>,
-                        max_temporal: u8,
-                    }>,
-                }>
-            }
-        ],
-        senders: [
-            {
-                kind: "audio" | "video",
-                id: String,
-                source: Option<{
-                    id: String,
-                    screen: bool,
-                }>,
-                metadata: Option<String>,
-                state: Option<{
-                    active: bool,
-                }>,
-            }
-        ],
-    },
-    sdp: String
+```proto
+message ConnectRequest {
+    string version = 2;
+    optional shared.RoomJoin join = 3;
+    features.Features features = 4;
+    shared.Tracks tracks = 5;
+    string sdp = 6;
 }
+```
+
+In there:
+
+```protobuf
+
 ```
 
 **_Response Data:_**
 
 ```
-{
-    sdp: Option<String>,
-    conn_id: String,
+message ConnectResponse {
+    string conn_id = 1;
+    string sdp = 2;
 }
 ```
 
 The explanation of each request parameter:
 
+- token: authorization token for connectivity only, it isn't room token.
 - version: is the version of the client SDK.
-- room_id: is the room that the client wants to connect to. This is [a-z0-9-] string, maximum is 32 characters.
-- peer_id: is the ID of the client. It's used to identify the client on the server side. It's unique in the room. This is [a-z0-9-] string, maximum is 32 characters
-- metadata: is the metadata of the client. It can be used to store some information about the client, such as user name .... It's optional and should be smaller than 512 characters.
-- event:
-
-  - publish: `full` will publish both peer info and track info. `track` will only publish track info.
-  - subscribe: `full` will subscribe to both remote peer info and track info. `track` will only subscribe to remote track info. `manual` will not subscribe to any source, the client must do it manually. This feature is useful for clients who want to use manual mode to subscribe to remote tracks. For example, in a proximity based audio application like [Gather](https://www.gather.town/), the client will set it to `manual` and only subscribe to peers that are near to it.
-
-- bitrate:
-
-  - ingress is the bitrate mode for the ingress stream. In `save` mode, the media server will limit the bitrate based on the network and consumers. In `max` mode, the media server will only limit the bitrate based on the network and media server configuration.
+- join: the information for joining to room, if not provide, it will connect in non-joined state and client must to call .join after have this information
 
 - features: a JSON object containing some features that the client wants to use. For example: mix-minus, spatial room, etc.
-- tracks:
-
-  - receivers: a list of receivers that the client wants to create. Each receiver is described with:
-
-    - kind: the kind of receiver, audio or video.
-    - id: the ID of the receiver.
-    - state: the state of the receiver. It's used to restore the receiver state when the client reconnects to the server. It contains:
-      - source: the remote source that the client wants to pin to. If it's none, the receiver will be created but not pinned to any source.
-      - limit: the limit of the receiver. If it's none, the receiver will be created with the default limit.
-
-  - senders: a list of senders that the client wants to create. Each sender is described with:
-    - kind: the kind of sender, audio or video.
-    - id: the ID of the sender.
-    - uuid: the UUID of the sender. It's used to identify the sender on the client side.
-    - metadata: It can be used to store some information about the client's track, such as label name, device .... It's optional and should be smaller than 512 characters.
-    - state: the state of the sender. It's used to restore the sender state when the client reconnects to the server. It contains:
-      - screen: a flag to indicate whether the sender is screen sharing.
-      - pause: a flag to indicate whether the sender is paused.
-
+- tracks: list of senders and receivers, which include state of it for fast initializing
 - sdp: the OfferSDP that the client created.
 
 The explanation of each response parameter:
@@ -177,13 +114,13 @@ The explanation of each response parameter:
 
 Error list:
 
-| Error code            | Description             |
-| --------------------- | ----------------------- |
-| INVALID_TOKEN         | The token is invalid.   |
-| INVALID_SDP           | The sdp is invalid.     |
-| INVALID_REQUEST       | The request is invalid. |
-| INTERNAL_SERVER_ERROR | The server is error.    |
-| GATEWAY_ERROR         | The gateway is error.   |
+| Code   | Error                 | Description             |
+| ------ | --------------------- | ----------------------- |
+| TODO   | INVALID_TOKEN         | The token is invalid.   |
+| 0x2000 | INVALID_SDP           | The sdp is invalid.     |
+| TODO   | INVALID_REQUEST       | The request is invalid. |
+| 0x2001 | INTERNAL_SERVER_ERROR | The server is error.    |
+| TODO   | GATEWAY_ERROR         | The gateway is error.   |
 
 After that, the client needs to wait for the connected event from the WebRTC connection and the connected event from the data channel.
 If the client doesn't receive any event after a period of time, it will set the restart ice flag and retry connecting to the server with the newest offer SDP.
@@ -219,53 +156,60 @@ Each time the client's WebRTC connection has a new ice-candidate, it should be s
 
 Error list:
 
-| Error code            | Description             |
-| --------------------- | ----------------------- |
-| INVALID_CONN          | The conn_id is invalid. |
-| INVALID_ICE           | The ice is invalid.     |
-| INVALID_REQUEST       | The request is invalid. |
-| INTERNAL_SERVER_ERROR | The server is error.    |
-| GATEWAY_ERROR         | The gateway is error.   |
+| Code | Error                 | Description             |
+| ---- | --------------------- | ----------------------- |
+|      | INVALID_CONN          | The conn_id is invalid. |
+|      | INVALID_ICE           | The ice is invalid.     |
+|      | INVALID_REQUEST       | The request is invalid. |
+|      | INTERNAL_SERVER_ERROR | The server is error.    |
+|      | GATEWAY_ERROR         | The gateway is error.   |
 
 ## 4.5 Datachannel Request/Response format
 
-The format for encoding all requests and responses sent over the data channel is JSON. The structure of the request and response objects is as follows:
+The format for encoding all requests and responses sent over the data channel is Protobuf. The structure of the request and response objects is as follows:
 
-Request/Event:
+```proto
+Request {
+    uint32 req_id = 1;
+    oneof request {
+        Session session = 2;
+        Sender sender = 3;
+        Receiver receiver = 4;
+    }
+}
 
-```
-{
-    type: "event" | "request",
-    seq: Number,
-    cmd: String,
-    data: Option<JSON>,
+message ClientEvent {
+    uint32 seq = 1;
+    oneof event {
+        Request request = 2;
+    }
 }
 ```
 
-Response:
+```proto
+message Response {
+    uint32 req_id = 1;
+    oneof response {
+        shared.Error error = 2;
+        Session session = 3;
+        Sender sender = 4;
+        Receiver receiver = 5;
+    }
+}
 
-```
-{
-    type: "answer",
-    seq: Number,
-    success: bool,
-    error_code: Option<String>,
-    error_msg: Option<String>,
-    data: Option<JSON>,
+message ServerEvent {
+    uint32 seq = 1;
+    oneof event {
+        Session session = 2;
+        Room room = 3;
+        Sender sender = 4;
+        Receiver receiver = 5;
+        Response response = 6;
+    }
 }
 ```
 
-The seq is an incremental value generated on the sender side. It helps us to map between requests and responses and also detect data loss.
-
-The cmd is generate with rule: `identify.action`, for example:
-
-- `session.update_sdp`.
-- `session.senders.toggle`.
-- `sessions.receivers.switch`.
-- `room.peers.subscribe`.
-- `room.peers.unsubscribe`.
-- `session.disconnect`.
-- `session.features.mix_minus.sources.add`.
+The seq is an incremental value generated on the sender side. It helps us to detect data loss. The req_id is used to map between requests and responses and also
 
 ## 4.6 In-session requests
 
@@ -280,202 +224,110 @@ Typically, the client will need to perform various actions with the media server
 
 All actions that involve changing tracks will be performed locally first, and then the `update_sdp` command will be sent to the server.
 
-### 4.6.1 Update SDP
-
-Each time we make changes to the WebRTC connection or negotiationneeded event fired, we need to send an `update_sdp` request to the server over the data channel. This request is described below:
-
-**_Cmd:_**: `session.update_sdp`
-
-**_Data:_**
+### 4.6.1 Session requests, events
 
 ```
-{
-    sdp: String,
-    tracks: {
-        receivers: [
-            {
-                kind: "audio" | "video",
-                id: String,
-                state: Option<{
-                    source: Option<{
-                        peer_id: String,
-                        track_id: String,
-                    }>,
-                    limit: Option<{
-                        priority: u16,
-                        min_spatial: Option<u8>,
-                        max_spatial: u8,
-                        min_temporal: Option<u8>,
-                        max_temporal: u8,
-                    }>,
-                }>
-            }
-        ],
-        senders: [
-            {
-                kind: "audio" | "video",
-                id: String,
-                source: Option<{
-                    id: String,
-                    screen: bool,
-                }>,
-                metadata: Option<String>,
-                state: Option<{
-                    active: bool,
-                }>,
-            }
-        ],
+message Request {
+    message Session {
+        message RoomJoin {
+            shared.RoomJoin info = 1;
+            string token = 2;
+        }
+
+        message RoomLeave {
+
+        }
+
+        message UpdateSdp {
+            shared.Tracks tracks = 1;
+            string sdp = 2;
+        }
+
+        message Disconnect {
+
+        }
+
+        oneof request {
+            RoomJoin join = 1;
+            RoomLeave leave = 2;
+            UpdateSdp sdp = 3;
+            Disconnect disconnect = 4;
+        }
     }
 }
 ```
 
-**_Response data_**:
-
 ```
-{
-    sdp: String
+message Response {
+    message Session {
+        message RoomJoin {
+
+        }
+
+        message RoomLeave {
+
+        }
+
+        message UpdateSdp {
+            string sdp = 1;
+        }
+
+        message Disconnect {
+
+        }
+
+        oneof response {
+            RoomJoin join = 1;
+            RoomLeave leave = 2;
+            UpdateSdp sdp = 3;
+            Disconnect disconnect = 4;
+        }
+    }
 }
 ```
 
-If state is defined, the server will update the state of the receiver/sender. If state is none, the server will not update the state of the receiver/sender.
-
-### 4.6.2 Room actions, event
-
-We can subscribe to peers event (joined, left, track added, track removed) and also can unsubscribe from it.
-
-#### 4.6.2.1 Action: Subscribe to other peers event
-
-(Note that this action only works with `event.subscribe` manual mode.)
-
-**_Cmd:_** `room.peers.subscribe`
-
-**_Request Data:_**
-
 ```
-{
-    peer_ids: [String],
+message ServerEvent {
+    message Session {
+        message Connected {
+
+        }
+
+        message JoinedRoom {
+            string room = 1;
+            string peer = 2;
+        }
+
+        message LeavedRoom {
+            string room = 1;
+            string peer = 2;
+        }
+
+        message Disconnected {
+            string reason =  1;
+        }
+
+        oneof event {
+            Connected connected = 1;
+            JoinedRoom joined = 2;
+            LeavedRoom leaved = 3;
+            Disconnected disconnected = 4;
+        }
+    }
 }
 ```
 
-**_Response Data:_** None
+#### 4.6.1.1 Update SDP action
 
-#### 4.6.2.2 Action: Unsubscribe to other peers event
+Each time we make changes to the WebRTC connection or negotiationneeded event fired, we need to send an `update_sdp` request to the server over the data channel. The update sdp request must to include tracks state.
 
-(Note that this action only works with `subscribe` manual mode.)
+#### 4.6.1.2 Room join/leave action
 
-**_Cmd:_**: `room.peers.unsubscribe`
+Client can dynamic join to other room with Join/Leave request. This is useful when we don't have information about room at connecting state, just connect and join after have. This feature also useful will video conference application, where user can join to other child rooms without recreate connection.
 
-**_Request Data:_**
+When user successful joined or leaved a room, server also send event JoinedRoom or LeavedRoom to client.
 
-```
-{
-    peer_ids: [String],
-}
-
-```
-
-#### 4.6.2.3 Event: Peer joined
-
-**_Cmd:_**: `room.peers.added`
-
-**_Event data:_**:
-
-```
-{
-    peer_id: String,
-    metadata: Option<String>,
-}
-```
-
-**_Response Data:_**: None
-
-#### 4.6.2.3 Event: Peer left
-
-**_Cmd:_**: `room.peers.removed`
-
-**_Event data:_**:
-
-```
-{
-    peer_id: String,
-}
-```
-
-**_Response Data:_**: None
-
-#### 4.6.2.3 Event: Track added
-
-**_Cmd:_**: `room.tracks.added`
-
-**_Event data:_**:
-
-```
-{
-    kind: "audio" | "video",
-    peer_id: String,
-    track_id: String,
-    source: Option<{
-        id: String,
-        screen: bool,
-    }>,
-    metadata: Option<String>,
-    state: {
-        active: bool,
-        scaling: Option<"simulcast" | "svc">,
-    },
-}
-```
-
-#### 4.6.2.3 Event: Track updated
-
-**_Cmd:_**: `room.peers.tracks.updated`
-
-**_Event data:_**:
-
-```
-{
-    kind: "audio" | "video",
-    peer_id: String,
-    track_id: String,
-    source: Option<{
-        id: String,
-        screen: bool,
-    }>,
-    metadata: Option<String>,
-    state: {
-        active: bool,
-        scaling: Option<"simulcast" | "svc">,
-    },
-}
-```
-
-#### 4.6.2.3 Event: Track removed
-
-**_Cmd:_**: `room.tracks.removed`
-
-**_Event data:_**:
-
-```
-{
-    kind: "audio" | "video",
-    peer_id: String,
-    track_id: String,
-}
-```
-
-**_Response Data:_**: None
-
-### 4.6.3 Session actions, event
-
-#### 4.6.3.1 Action: Disconnect
-
-**_Cmd:_**: `session.disconnect`
-
-**_Request data:_**: None
-
-**_Response:_**: None
-
-#### 4.6.3.2 Event: Goaway
+#### 4.6.1.3 GoAway event
 
 Goaway event is sent by the server in some cases:
 
@@ -483,90 +335,198 @@ Goaway event is sent by the server in some cases:
 - The client lifetime is expired, this is useful in some video conference application where each client only has limited session time; example 1 hour.
 - The client is kicked by the server.
 
-In case of a server shutdown or restart, the client should reconnect by sending restart-ice request.
-
-**_Cmd:_**: `session.on_goaway`
-
-**_Event data:_**:
-
-```
-{
-    reason: "shutdown" | "kick",
-    message: Option<String>,
-    remain_seconds: Number,
-}
-```
-
-**_Response Data:_**: None
-
 `remain_seconds` represents the remaining time that the client will be served by the server. In the event that a client needs to reconnect, it should do so before the remain_seconds expire to avoid interrupting the client session.
 
 In case of "shutdown", the client should reconnect by sending restart-ice request.
 
-### 4.6.4 Session Sender create/release, actions, events
+### 4.6.2 Room requests, events
+
+We can subscribe to peers event (joined, left, track added, track removed) and also can unsubscribe from it.
+
+```
+message Request {
+    message Rooom {
+        message SubscribePeer {
+            string peer = 1;
+        }
+
+        message UnsubscribePeer {
+            string peer = 1;
+        }
+
+        oneof request {
+            SubscribePeer subscribe;
+            UnsubscribePeer unsubscribe;
+        }
+    }
+}
+```
+
+```
+message Response {
+    message Rooom {
+        message SubscribePeer {
+
+        }
+
+        message UnsubscribePeer {
+
+        }
+
+        oneof response {
+            SubscribePeer subscribe;
+            UnsubscribePeer unsubscribe;
+        }
+    }
+}
+```
+
+```
+message ServerEvent {
+    message Room {
+        message PeerJoined {
+            string peer = 1;
+            optional string metadata = 2;
+        }
+
+        message PeerUpdated {
+            string peer = 1;
+            optional string metadata = 2;
+        }
+
+        message PeerLeaved {
+            string peer = 1;
+        }
+
+        message TrackStarted {
+            string peer = 1;
+            string track = 2;
+            shared.Kind kind = 3;
+            optional string metadata = 4;
+        }
+
+        message TrackUpdated {
+            string peer = 1;
+            string track = 2;
+            shared.Kind kind = 3;
+            optional string metadata = 4;
+        }
+
+        message TrackStopped {
+            string peer = 1;
+            string track = 2;
+            shared.Kind kind = 3;
+        }
+
+        oneof event {
+            PeerJoined peer_joined = 1;
+            PeerUpdated peer_updated = 2;
+            PeerLeaved peer_leaved = 3;
+            TrackStarted track_started = 4;
+            TrackUpdated track_updated = 5;
+            TrackStopped track_stopped = 6;
+        }
+    }
+}
+```
+
+#### 4.6.2.1 Action: Subscribe/Unsubscribe to other peers event
+
+(Note that this action only works with `subscribe.tracks` is false.)
+
+This feature for allowing client free to select what peer it interested in, it is useful in spatial-chat application like `Gather.town`. By subscribe, server will send peer's tracks event like: started, stopped or updated.
+
+#### 4.6.2.3 Event: Peer joined / updated / leaved
+
+If client connect with `subscribe.peers` is true, server will send event about joined and leaved event of each peers which joined with `publish.peer` is true.
+
+#### 4.6.2.3 Event: Track started / updated / stopped
+
+If client connect with `subscribe.tracks` is true or client subscribed to the peer, server will send event about peer's track started or stopped event of each peers which joined with `publish.tracks` is true.
+
+### 4.6.3 Sender, actions, events
 
 For creating a sender, we need to create a transceiver with kind as audio or video. After that, we need to create a track and add it to the transceiver. Then we need to send an `update_sdp` request to the server.
 
-For destroying a sender, we need to remove the track from the transceiver and remove the transceiver from the connection. Then we need to send an `update_sdp` request to the server.
+```
+message Request {
+    message Sender {
+        message Attach {
+            shared.Sender.Source source = 1;
+            shared.Sender.Config config = 2;
+        }
 
-Each sender has some actions and events with the following rule: `session.sender.{id}.{action}`
+        message Detach {
 
-#### 4.6.4.1 Action: Switch sender source
+        }
+
+        string name = 1;
+        oneof request {
+            Attach attach = 2;
+            Detach detach = 3;
+            shared.Sender.Config config = 4;
+        }
+    }
+}
+```
+
+```
+message Response {
+    message Sender {
+        message Attach {
+
+        }
+
+        message Detach {
+
+        }
+
+        message Config {
+
+        }
+
+        oneof response {
+            Attach attach = 1;
+            Detach detach = 2;
+            Config config = 3;
+        }
+    }
+}
+```
+
+```
+message ServerEvent {
+    message Sender {
+        message State {
+            enum StateType {
+                WAITING = 0;
+                NO_SOURCE = 1;
+                ACTIVE = 2;
+                INACTIVE = 3;
+            }
+
+            StateType state = 1;
+        }
+
+        string name = 1;
+        oneof event {
+            State state = 2;
+        }
+    }
+}
+```
+
+#### 4.6.3.1 Attach or detach sender source action
 
 This action is used when the user changes the source, for example, when the user changes the camera or microphone. This can also be used when the user stops sharing the camera, in which case we will release the local stream and send a switch without the source param.
 
-**_Cmd:_**: `session.senders.switch`
+If source is none, this sender will be removed from the room, and the receiver that is pinned to this sender will receive an updated event with the source not set. The room also sends a TrackStopped event to all subscribed peers.
 
-**_Request data:_**
-
-```
-{
-    id: String,
-    source: Option<{
-        id: String,
-        screen: bool,
-    }>,
-    metadata: Option<String>,
-}
-```
-
-**_Response Data:_**: None
-
-If source is none, this sender will be removed from the room, and the receiver that is pinned to this sender will receive an updated event with the source not set. The room also sends a `room.senders.removed` event to all subscribed peers.
-
-If the source is set and changed, this sender's active state will be reset to true. Note that screen and metadata only work with a changed source value. In the case of the source not being changed, the server will refuse the request.
-
-#### 4.6.4.1 Action: Toggle sender pause/resume
-
-This action is used when user mute/unmute the sender, this is useful when toggle the microphone button, we just stop local source and sending toggle with active false param.
-
-**_Cmd:_**: `session.senders.toggle`
-
-**_Request data:_**
-
-```
-{
-    id: String,
-    active: bool,
-}
-```
-
-**_Response Data:_**: None
-
-#### 4.6.4.2 Event: State event
+#### 4.6.3.2 State updated event
 
 This event is sent by the server when the state of the sender is changed. This is useful when the client implements loading animation when the user changes the source, or when the user mutes/unmutes the sender.
 
-**_Cmd:_**: `session.senders.state`
-
-**_Event data:_**:
-
-```
-{
-    id: String,
-    state: "waiting" | "no-source" | "active" | "inactive"
-}
-```
+Sender states is explained below:
 
 - Waiting: The sender is pinned but server dont received any media data.
 - No-source: The sender is not pinned to any source.
@@ -592,72 +552,108 @@ graph LR
     I -->|switch none| NS
 ```
 
-### 4.6.5 Session Receiver create/release, actions
+### 4.6.4 Receiver create/release, actions
 
 To create a receiver, we need to create a transceiver with kind as audio or video. After that, we need to create a track and add it to the transceiver. Then we need to send an `update_sdp` request to the server.
 
-Each receiver has some actions and events with the following rule: `session.receiver.{id}.{action}`
-
-### 4.6.5.1 Action: Switch receiver source
-
-**_Cmd:_**: `session.receivers.switch`
-
-**_Request data:_**
-
 ```
-{
-    id: string,
-    priority: u16,
-    source: Option<{
-        peer_id: String,
-        track_id: String,
-    }>,
+message Request {
+    message Receiver {
+        message Attach {
+            shared.Receiver.Source source = 1;
+            shared.Receiver.Config config = 2;
+        }
+
+        message Detach {
+
+        }
+
+        string name = 1;
+        oneof request {
+            Attach attach = 2;
+            Detach detach = 3;
+            shared.Receiver.Config config = 4;
+        }
+    }
 }
 ```
 
-**_Response data:_**: None
+```
+message Response {
+    message Receiver {
+        message Attach {
+
+        }
+
+        message Detach {
+
+        }
+
+        message Config {
+
+        }
+
+        oneof response {
+            Attach attach = 1;
+            Detach detach = 2;
+            Config config = 3;
+        }
+    }
+}
+```
+
+```
+message ServerEvent {
+    message Receiver {
+        message State {
+            enum StateType {
+                NO_SOURCE = 0;
+                WAITING = 1;
+                LIVE = 2;
+                INACTIVE = 3;
+            }
+
+            StateType state = 1;
+        }
+
+        message Stats {
+            message Source {
+                uint32 bitrate_kbps = 1;
+                float rtt = 2;
+                float lost = 3;
+                float jitter = 4;
+            }
+
+            message Transmit {
+                uint32 spatial = 1;
+                uint32 temporal = 2;
+                uint32 bitrate_kbps = 3;
+            }
+
+            optional Source source = 1;
+            optional Transmit transmit = 2;
+        }
+
+        string name = 1;
+        oneof event {
+            State state = 2;
+            Stats stats = 3;
+        }
+    }
+}
+```
+
+### 4.6.4.1 Attach or detach receiver source action
 
 If source is none, the receiver will be paused.
 
-### 4.6.5.2 Action: Limit receiver bitrate
+### 4.6.4.2 Config action
 
-**_Cmd:_**: `session.receiver.limit`
+We can provide new config when UI changed for updating priority and limit of quality for better bitrate usage.
 
-**_Request data:_**
+### 4.6.5.3 State updated event
 
-```
-{
-    id: String,
-    priority: u16,
-    min_spatial: Option<u8>,
-    max_spatial: u8,
-    min_temporal: Option<u8>,
-    max_temporal: u8,
-}
-```
-
-**_Response data:_**: None
-
-### 4.6.5.3 Event: Receiver state
-
-**_Event:_**: `session.receivers.state`
-
-**_Event data:_**:
-
-```
-{
-    id: String,
-    state: "no_source" | "waiting" | "live" | "key_only" | "inactive",
-    source: Option<{
-        scaling: Option<"simulcast" | "svc">,
-        spatials: Number,
-        temporals: Number,
-        codec: "opus" | "vp8" | "vp9" | "h264" | "h265" | "av1",
-    }>,
-}
-```
-
-Receiver state is explained below:
+Receiver states is explained below:
 
 - `no_source`: The receiver is created but not pinned to any source.
 - `waiting`: The receiver is pinned but does not received media data.
@@ -692,28 +688,9 @@ graph LR
     I --> |Source lost| NS
 ```
 
-### 4.6.5.3 Event: Receiver stats
+### 4.6.5.3 Receiver stats event
 
-**_Event:_**: `session.receivers.stats`
-
-**_Event data:_**:
-
-```
-{
-    id: String,
-    source: Option<{
-        bitrate: Number,
-        rtt: Number,
-        lost: Number,
-        jitter: Number,
-    }>,
-    transmit: Option<{
-        spatial: Number,
-        temporal: Number,
-        bitrate: Number,
-    }>,
-}
-```
+Stats information can be used for show current issues for viewer, which can provide more useful about source of the issues.
 
 ## 4.7 Features
 
@@ -724,103 +701,91 @@ The mix-minus feature has two modes:
 - Manual: In this mode, the client can manually add or remove sources to the mixer.
 - Auto: In this mode, the media server will automatically add or remove all audio sources except the local source to the mixer.
 
+```
+message Request {
+    message Attach {
+        repeated Source sources = 1;
+    }
+
+    message Detach {
+        repeated Source sources = 1;
+    }
+
+    oneof request {
+        Attach attach = 1;
+        Detach detach = 2;
+    }
+}
+```
+
+```
+message Response {
+    message Attach {
+
+    }
+
+    message Detach {
+
+    }
+
+    oneof response {
+        Attach attach = 1;
+        Detach detach = 2;
+    }
+}
+```
+
+```
+message ServerEvent {
+    message MappingSlotSet {
+        uint32 slot = 1;
+        Source source = 2;
+    }
+
+    message MappingSlotDel {
+        uint32 slot = 1;
+    }
+
+    message SlotAudioLevel {
+        uint32 slot = 1;
+        int32 audio_level = 2;
+    }
+
+    message MappingSlotsAudioLevel {
+        repeated SlotAudioLevel slots = 1;
+    }
+
+    oneof event {
+        MappingSlotSet slot_set = 1;
+        MappingSlotDel slot_del = 2;
+        MappingSlotsAudioLevel slots_audio_level = 3;
+    }
+}
+```
+
 #### 4.7.1.1 Connect request
 
 In connect request, we add field to features params:
 
 ```
-{
-    features: {
-        mix_minus: {
-            mode: "manual" | "auto",
-            sources: [
-                {
-                    peer_id: String,
-                    track_id: String,
-                }
-            ]
-        }
-    }
+message Source {
+    string peer = 1;
+    string track = 2;
+}
+
+message Config {
+    Mode mode = 1;
+    repeated Source sources = 2;
 }
 ```
 
-#### 4.7.1.2 Action: Add source to mixer
+#### 4.7.1.2 Action: Add/remove source to mixer
 
 Note that, this action only work with `manual` mode.
 
-**_Cmd:_**: `session.features.mix_minus.sources.add`
+#### 4.7.1.3 State update event
 
-**_Request data:_**
-
-```
-{
-    sources: [
-        {
-            peer_id: String,
-            track_id: String,
-        }
-    ]
-}
-```
-
-**_Response data:_**: None
-
-#### 4.7.1.3 Action: Remove source from mixer
-
-Note that, this action only work with `manual` mode.
-
-**_Cmd:_**: `session.features.mix_minus.sources.remove`
-
-**_Request data:_**
-
-```
-{
-    sources: [
-        {
-            peer_id: String,
-            track_id: String,
-        }
-    ]
-}
-```
-
-**_Response data:_**: None
-
-#### 4.7.1.4 Action: Pause mix-minus mixer
-
-**_Cmd:_**: `session.features.mix_minus.pause`
-
-**_Request data:_** None
-
-**_Response data:_**: None
-
-#### 4.7.1.5 Action: Resume mix-minus mixer
-
-**_Cmd:_**: `session.features.mix_minus.resume`
-
-**_Request data:_**: None
-
-**_Response data:_**: None
-
-#### 4.7.1.6 Event: State update
-
-**_Cmd:_**: `session.features.mix_minus.state`
-
-**_Event data:_**
-
-```
-{
-    slots: [
-        {
-            source: Option<{
-                peer_id: String,
-                track_id: String,
-                audio_level: Number,
-            }>,
-        }
-    ]
-}
-```
+We have 2 types of event, slot bind changed and slot audio level.
 
 # 5. Drawbacks
 
@@ -835,7 +800,7 @@ No drawbacks.
 We have some alternatives:
 
 - Whip/Whep: but it not flexible and cannot be used to create complex media stream topology.
-- Livekit protocol: the protocol don't have document and it's is designed for Livekit server topology.
+- Livekit protocol: the protocol is designed for Livekit server topology.
 
 # 7. Unresolved questions
 
