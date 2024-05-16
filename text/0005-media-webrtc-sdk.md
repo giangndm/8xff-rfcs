@@ -82,18 +82,13 @@ message ConnectRequest {
 }
 ```
 
-In there:
-
-```protobuf
-
-```
-
 **_Response Data:_**
 
-```
+```proto
 message ConnectResponse {
     string conn_id = 1;
     string sdp = 2;
+    bool ice_lite = 3;
 }
 ```
 
@@ -106,6 +101,7 @@ The explanation of each request parameter:
 - features: a JSON object containing some features that the client wants to use. For example: mix-minus, spatial room, etc.
 - tracks: list of senders and receivers, which include state of it for fast initializing
 - sdp: the OfferSDP that the client created.
+- ice_lite: if this is true, that mean server is running without ice-trickle, so we dont need to send ice candidate to server.
 
 The explanation of each response parameter:
 
@@ -144,22 +140,27 @@ Each time the client's WebRTC connection has a new ice-candidate, it should be s
 
 **_Endpoint_**: POST `GATEWAY/webrtc/conns/:conn_id/ice-candidate`
 
-**_Body_**:
+Request:
 
-```
-{
-    candidate: String
+```proto
+message RemoteIceRequest {
+    repeated string candidates = 1;
 }
 ```
 
-**_Response Data_**: None
+Response:
+
+```proto
+message RemoteIceResponse {
+    uint32 added = 1;
+}
+```
 
 Error list:
 
 | Code | Error                 | Description             |
 | ---- | --------------------- | ----------------------- |
 |      | INVALID_CONN          | The conn_id is invalid. |
-|      | INVALID_ICE           | The ice is invalid.     |
 |      | INVALID_REQUEST       | The request is invalid. |
 |      | INTERNAL_SERVER_ERROR | The server is error.    |
 |      | GATEWAY_ERROR         | The gateway is error.   |
@@ -226,7 +227,7 @@ All actions that involve changing tracks will be performed locally first, and th
 
 ### 4.6.1 Session requests, events
 
-```
+```proto
 message Request {
     message Session {
         message RoomJoin {
@@ -257,7 +258,7 @@ message Request {
 }
 ```
 
-```
+```proto
 message Response {
     message Session {
         message RoomJoin {
@@ -286,7 +287,7 @@ message Response {
 }
 ```
 
-```
+```proto
 message ServerEvent {
     message Session {
         message Connected {
@@ -343,7 +344,7 @@ In case of "shutdown", the client should reconnect by sending restart-ice reques
 
 We can subscribe to peers event (joined, left, track added, track removed) and also can unsubscribe from it.
 
-```
+```proto
 message Request {
     message Rooom {
         message SubscribePeer {
@@ -362,7 +363,7 @@ message Request {
 }
 ```
 
-```
+```proto
 message Response {
     message Rooom {
         message SubscribePeer {
@@ -381,7 +382,7 @@ message Response {
 }
 ```
 
-```
+```proto
 message ServerEvent {
     message Room {
         message PeerJoined {
@@ -448,7 +449,7 @@ If client connect with `subscribe.tracks` is true or client subscribed to the pe
 
 For creating a sender, we need to create a transceiver with kind as audio or video. After that, we need to create a track and add it to the transceiver. Then we need to send an `update_sdp` request to the server.
 
-```
+```proto
 message Request {
     message Sender {
         message Attach {
@@ -470,7 +471,7 @@ message Request {
 }
 ```
 
-```
+```proto
 message Response {
     message Sender {
         message Attach {
@@ -494,7 +495,7 @@ message Response {
 }
 ```
 
-```
+```proto
 message ServerEvent {
     message Sender {
         message State {
@@ -556,7 +557,7 @@ graph LR
 
 To create a receiver, we need to create a transceiver with kind as audio or video. After that, we need to create a track and add it to the transceiver. Then we need to send an `update_sdp` request to the server.
 
-```
+```proto
 message Request {
     message Receiver {
         message Attach {
@@ -578,7 +579,7 @@ message Request {
 }
 ```
 
-```
+```proto
 message Response {
     message Receiver {
         message Attach {
@@ -602,7 +603,7 @@ message Response {
 }
 ```
 
-```
+```proto
 message ServerEvent {
     message Receiver {
         message State {
@@ -701,7 +702,7 @@ The mix-minus feature has two modes:
 - Manual: In this mode, the client can manually add or remove sources to the mixer.
 - Auto: In this mode, the media server will automatically add or remove all audio sources except the local source to the mixer.
 
-```
+```proto
 message Request {
     message Attach {
         repeated Source sources = 1;
@@ -718,7 +719,7 @@ message Request {
 }
 ```
 
-```
+```proto
 message Response {
     message Attach {
 
@@ -735,7 +736,7 @@ message Response {
 }
 ```
 
-```
+```proto
 message ServerEvent {
     message MappingSlotSet {
         uint32 slot = 1;
@@ -767,7 +768,7 @@ message ServerEvent {
 
 In connect request, we add field to features params:
 
-```
+```proto
 message Source {
     string peer = 1;
     string track = 2;
