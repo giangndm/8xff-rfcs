@@ -496,17 +496,19 @@ message Response {
 ```
 
 ```proto
+module shared {
+    message Sender {
+        enum Status {
+            ACTIVE = 0;
+            INACTIVE = 1;
+        }
+    }
+}
+
 message ServerEvent {
     message Sender {
         message State {
-            enum StateType {
-                WAITING = 0;
-                NO_SOURCE = 1;
-                ACTIVE = 2;
-                INACTIVE = 3;
-            }
-
-            StateType state = 1;
+            shared.Sender.Status status = 1;
         }
 
         string name = 1;
@@ -529,29 +531,8 @@ This event is sent by the server when the state of the sender is changed. This i
 
 Sender states is explained below:
 
-- Waiting: The sender is pinned but server dont received any media data.
-- No-source: The sender is not pinned to any source.
 - Active: The sender is active, and server is receiving media data.
-- Inactive: The sender is pinned but .
-
-```mermaid
-graph LR
-    P1[create with source]
-    P2[create without source]
-    W[waiting]
-    NS[no-source]
-    A[active]
-    I[inactive]
-    P1 --> W
-    P2 --> NS
-    W -->|media data| A
-    A -->|toggle false| I
-    I -->|toggle true| W
-    NS -->|switch| W
-    W -->|switch none| NS
-    A -->|switch none| NS
-    I -->|switch none| NS
-```
+- Inactive: Server hasn't received media data for a long time, currently is 2 seconds.
 
 ### 4.6.4 Receiver create/release, actions
 
@@ -607,38 +588,12 @@ message Response {
 message ServerEvent {
     message Receiver {
         message State {
-            enum StateType {
-                NO_SOURCE = 0;
-                WAITING = 1;
-                LIVE = 2;
-                INACTIVE = 3;
-            }
-
-            StateType state = 1;
-        }
-
-        message Stats {
-            message Source {
-                uint32 bitrate_kbps = 1;
-                float rtt = 2;
-                float lost = 3;
-                float jitter = 4;
-            }
-
-            message Transmit {
-                uint32 spatial = 1;
-                uint32 temporal = 2;
-                uint32 bitrate_kbps = 3;
-            }
-
-            optional Source source = 1;
-            optional Transmit transmit = 2;
+            shared.Receiver.Status status = 1;
         }
 
         string name = 1;
         oneof event {
             State state = 2;
-            Stats stats = 3;
         }
     }
 }
@@ -654,44 +609,11 @@ We can provide new config when UI changed for updating priority and limit of qua
 
 ### 4.6.5.3 State updated event
 
-Receiver states is explained below:
+Receiver's status is explained below:
 
-- `no_source`: The receiver is created but not pinned to any source.
-- `waiting`: The receiver is pinned but does not received media data.
-- `live`: The receiver is live.
-- `key_only`: The receiver is live but only receives key frames, which may be for speed limiting purposes.
-- `inactive`: The receiver is pinned but does not have enough bandwidth to receive.
-
-```mermaid
-graph LR
-    NS[no-source]
-    W[waiting]
-    L[live]
-    KO[key-only]
-    I[inactive]
-    NS -->|switch| W
-    W -->|media data + bandwidth level 2| L
-    W -->|media data + bandwidth level 1| KO
-    L -->|speed limit| KO
-    W -->|media data + no bandwidth| I
-    L -->|no bandwidth| I
-    KO -->|no bandwidth| I
-    W -->|switch none| NS
-    L -->|switch none| NS
-    I -->|switch none| NS
-    KO -->|switch none| NS
-    I --> |bandwidth level 2| L
-    I --> |bandwidth level 1| KO
-    KO --> |bandwidth level 2| L
-    W --> |Source lost| NS
-    L --> |Source lost| NS
-    KO --> |Source lost| NS
-    I --> |Source lost| NS
-```
-
-### 4.6.5.3 Receiver stats event
-
-Stats information can be used for show current issues for viewer, which can provide more useful about source of the issues.
+- `waiting`: The receiver is pinned and waiting for media data.
+- `active`: The receiver is live.
+- `inactive`: The receiver hasn't media data for a long time, currently is 2 seconds.
 
 ## 4.7 Features
 
